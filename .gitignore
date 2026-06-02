@@ -1,0 +1,18 @@
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/playwright-report-api/
+/playwright-report-ui/
+/blob-report/
+/playwright/.cache/
+
+# Auth state (cookies) — jangan pernah dicommit ke git
+/.auth/
+
+# Environment variables — berisi kredensial sensitif
+.env
+.env.test
+
+/generated/prisma

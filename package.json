@@ -1,0 +1,37 @@
+{
+  "name": "simak-e2e",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test:api": "cross-env PLAYWRIGHT_HTML_OUTPUT_FOLDER=playwright-report-api playwright test --project=setup-admin --project=setup-api-data --project=api",
+    "test:ui": "cross-env PLAYWRIGHT_HTML_OUTPUT_FOLDER=playwright-report-ui playwright test --project=setup-admin --project=setup-lecturer --project=setup-student --project=admin --project=lecturer --project=student",
+    "test:ui:clean": "cross-env PLAYWRIGHT_HTML_OUTPUT_FOLDER=playwright-report-ui playwright test --project=setup-admin --project=setup-student --project=admin --project=student tests/admin/courses/assessment.spec.ts tests/admin/courses/course.spec.ts tests/admin/courses/grade-component.spec.ts tests/admin/reregistrations/reregistration.spec.ts tests/student/reregistrations/reregistration-student.spec.ts",
+    "test:all": "playwright test",
+    "report:api": "playwright show-report playwright-report-api",
+    "report:ui": "playwright show-report playwright-report-ui",
+    "report:deploy:api": "gh-pages -d playwright-report-api --dest api --dotfiles",
+    "report:deploy:ui": "gh-pages -d playwright-report-ui --dest ui --dotfiles"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^25.4.0",
+    "@types/pg": "^8.20.0",
+    "cross-env": "^10.1.0",
+    "dotenv": "^17.4.2",
+    "gh-pages": "^6.3.0",
+    "prisma": "^7.8.0",
+    "tsx": "^4.22.0"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "bcryptjs": "^3.0.3",
+    "pg": "^8.20.0"
+  }
+}
