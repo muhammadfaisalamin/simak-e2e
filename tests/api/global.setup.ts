@@ -109,17 +109,35 @@ setup('seed API test data', async () => {
     year: number | null;
     majorId: number | null;
     lecturerId: string | null;
+    name: string | null;
+    nim: string | null;
+    placeOfBirth: string | null;
+    birthday: Date | null;
+    address: string | null;
+    domicile: string | null;
+    email: string | null;
+    hp: string | null;
+    motherName: string | null;
+    motherNIK: string | null;
+    guardianName: string | null;
+    guardianNIK: string | null;
+    guardianHp: string | null;
+    guardianJob: string | null;
+    guardianAddress: string | null;
   }>(
-    `SELECT year, "majorId", "lecturerId" FROM sb25_students WHERE id = $1`,
+    `SELECT year, "majorId", "lecturerId", name, nim, "placeOfBirth", birthday,
+            address, domicile, email, hp, "motherName", "motherNIK",
+            "guardianName", "guardianNIK", "guardianHp", "guardianJob", "guardianAddress"
+       FROM sb25_students WHERE id = $1`,
     [studentId],
   );
 
-  const originalStudentYear      = student.year;
-  const originalStudentMajorId   = student.majorId;
+  const originalStudentYear       = student.year;
+  const originalStudentMajorId    = student.majorId;
   const originalStudentLecturerId = student.lecturerId;
 
   // Resolve values we'll use for student's year/major/lecturer
-  let effectiveMajorId   = student.majorId;
+  let effectiveMajorId    = student.majorId;
   let effectiveLecturerId = student.lecturerId;
   let effectiveYear       = student.year;
 
@@ -138,16 +156,53 @@ setup('seed API test data', async () => {
   }
 
   const studentWasModified =
-    effectiveMajorId   !== originalStudentMajorId   ||
+    effectiveMajorId    !== originalStudentMajorId   ||
     effectiveLecturerId !== originalStudentLecturerId ||
     effectiveYear       !== originalStudentYear;
 
-  if (studentWasModified) {
+  // Fill in required PDF fields with defaults if null — ensures reregister PDF can be generated
+  const needsPdfFields =
+    !student.name || !student.nim || !student.placeOfBirth || !student.birthday ||
+    !student.address || !student.domicile || !student.hp || !student.email ||
+    !student.motherName || !student.motherNIK ||
+    !student.guardianName || !student.guardianNIK || !student.guardianHp ||
+    !student.guardianJob || !student.guardianAddress;
+
+  if (studentWasModified || needsPdfFields) {
     await pool.query(
-      `UPDATE sb25_students SET year=$1, "majorId"=$2, "lecturerId"=$3 WHERE id=$4`,
-      [effectiveYear, effectiveMajorId, effectiveLecturerId, studentId],
+      `UPDATE sb25_students
+          SET year         = $1,
+              "majorId"    = $2,
+              "lecturerId" = $3,
+              name              = COALESCE(name, $4),
+              nim               = COALESCE(nim, $5),
+              "placeOfBirth"    = COALESCE("placeOfBirth", $6),
+              birthday          = COALESCE(birthday, $7),
+              address           = COALESCE(address, $8),
+              domicile          = COALESCE(domicile, $9),
+              email             = COALESCE(email, $10),
+              hp                = COALESCE(hp, $11),
+              "motherName"      = COALESCE("motherName", $12),
+              "motherNIK"       = COALESCE("motherNIK", $13),
+              "guardianName"    = COALESCE("guardianName", $14),
+              "guardianNIK"     = COALESCE("guardianNIK", $15),
+              "guardianHp"      = COALESCE("guardianHp", $16),
+              "guardianJob"     = COALESCE("guardianJob", $17),
+              "guardianAddress" = COALESCE("guardianAddress", $18)
+        WHERE id = $19`,
+      [
+        effectiveYear, effectiveMajorId, effectiveLecturerId,
+        'E2E Test Student', '99000001',
+        'Jakarta', new Date('2000-01-01'),
+        'Jl. E2E No. 1, Jakarta', 'Jl. E2E No. 1, Jakarta',
+        'e2e@test.local', '081234567890',
+        'E2E Mother', '1234567890123456',
+        'E2E Guardian', '1234567890123457', '081234567891',
+        'Wiraswasta', 'Jl. Guardian E2E No. 1',
+        studentId,
+      ],
     );
-    console.log(`  [api-setup] Updated test student: year=${effectiveYear}, majorId=${effectiveMajorId}`);
+    console.log(`  [api-setup] Updated test student fields (year, majorId, pdf fields)`);
   }
 
   // ── 2. Course ───────────────────────────────────────────────────────────────
@@ -174,6 +229,7 @@ setup('seed API test data', async () => {
     semesterStatus: 'AKTIF',
     isStatusForm: true,
     paymentStatus: 'LUNAS',
+    lecturerId: effectiveLecturerId,
   });
   console.log(`  [api-setup] Created reregisterDetail for student ${studentId}`);
 

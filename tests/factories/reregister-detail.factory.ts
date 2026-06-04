@@ -8,6 +8,7 @@ export type ReregisterDetailInput = {
   paymentStatus?: 'BELUM_LUNAS' | 'LUNAS';
   paymentDescription?: string | null;
   isStatusForm?: boolean;
+  lecturerId?: string | null;
 };
 
 export async function createReregisterDetail(
@@ -18,8 +19,8 @@ export async function createReregisterDetail(
   await pool.query(
     `INSERT INTO sb25_reregister_details
        ("reregisterId", "studentId", semester, "semesterStatus", "campusType",
-        nominal, "paymentStatus", "paymentDescription", "isStatusForm")
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        nominal, "paymentStatus", "paymentDescription", "isStatusForm", "lecturerId")
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
     [
       reregisterId,
       studentId,
@@ -30,6 +31,7 @@ export async function createReregisterDetail(
       input.paymentStatus ?? 'BELUM_LUNAS',
       input.paymentDescription ?? null,
       input.isStatusForm ?? false,
+      input.lecturerId ?? null,
     ],
   );
   return { reregisterId, studentId };
