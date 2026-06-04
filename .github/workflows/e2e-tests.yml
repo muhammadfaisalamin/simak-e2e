@@ -59,15 +59,21 @@ jobs:
 
           ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
 
-          # Test autentikasi SSH dulu sebelum buka tunnel
+          # Test autentikasi SSH dengan verbose — output ke file lalu print
           echo "Menguji koneksi SSH..."
           ssh -i ~/.ssh/id_rsa \
+              -v \
               -o BatchMode=yes \
               -o ConnectTimeout=15 \
               -o StrictHostKeyChecking=no \
               "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-              "echo 'SSH auth OK'" \
-            || { echo "SSH auth GAGAL — periksa SSH_PRIVATE_KEY, SSH_USER, SSH_HOST di Secrets"; exit 1; }
+              "echo 'SSH auth OK'" > /tmp/ssh-test.log 2>&1
+          SSH_EXIT=$?
+          cat /tmp/ssh-test.log
+          if [ $SSH_EXIT -ne 0 ]; then
+            echo "SSH auth GAGAL — lihat verbose log di atas"
+            exit 1
+          fi
 
           # Buka tunnel di background
           ssh -i ~/.ssh/id_rsa \
