@@ -417,6 +417,9 @@ File ini harus berada di lokasi yang spesifik: `.github/workflows/`.
 mkdir -p .github/workflows
 ```
 
+> **Penting:** Nama foldernya harus persis `workflows` (bukan `wokflows` atau typo lain).
+> GitHub Actions hanya membaca file dari `.github/workflows/`.
+
 ### 8.2 Buat file workflow
 
 Buat file `.github/workflows/e2e-tests.yml` dengan isi berikut:
@@ -424,18 +427,22 @@ Buat file `.github/workflows/e2e-tests.yml` dengan isi berikut:
 ```yaml
 name: E2E Tests SIMAK
 
-# Kapan workflow ini dijalankan:
+# Opt-in ke Node.js 24 untuk semua actions (checkout, setup-node, cache, upload-artifact)
+# Wajib sejak Juni 2026 — Node.js 20 sudah deprecated di GitHub Actions
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
-    branches: [main]          # Setiap push ke branch main
+    branches: [main]
   pull_request:
-    branches: [main]          # Setiap pull request ke main
-  workflow_dispatch:           # Bisa dijalankan manual dari GitHub UI
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   e2e-tests:
-    runs-on: ubuntu-latest     # Jalankan di server Ubuntu milik GitHub
-    timeout-minutes: 60        # Hentikan paksa jika lebih dari 60 menit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
 
@@ -448,127 +455,164 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'          # Cache node_modules agar build lebih cepat
+          cache: 'npm'
 
-      # ── LANGKAH 3: Install semua dependencies dari package.json ────────
+      # ── LANGKAH 3: Install semua dependencies ─────────────────────────
       - name: Install dependencies
         run: npm ci
-        # npm ci lebih strict dari npm install:
-        # - Selalu install dari package-lock.json (reproducible build)
-        # - Gagal jika package-lock.json tidak sinkron dengan package.json
 
-      # ── LANGKAH 4: Install browser Chromium untuk Playwright ───────────
-      - name: Install Playwright Chromium
+      # ── LANGKAH 4: Cache Playwright Binaries ──────────────────────────
+      # Menghemat ~1-2 menit per run jika package-lock.json tidak berubah
+      - name: Cache Playwright Binaries
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+
+      # ── LANGKAH 5: Install Playwright Chromium ────────────────────────
+      - name: Install Playwright Chromium (Cache Miss)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium --with-deps
-        # --with-deps: install juga library sistem yang dibutuhkan Chromium
-        # Hanya install chromium (bukan firefox/webkit) untuk hemat waktu
 
-      # ── LANGKAH 5: Setup SSH Tunnel ke database VPS ───────────────────
-      # Ini adalah langkah kunci. Tunnel memetakan:
-      # localhost:5432 (runner) → localhost:5432 (VPS)
+      - name: Install Playwright System Dependencies Only (Cache Hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # ── LANGKAH 6: Setup SSH Tunnel ke database VPS ───────────────────
+      # Tunnel memetakan: localhost:5432 (runner) → localhost:5432 (VPS)
+      # SYARAT: port 22 VPS harus terbuka untuk koneksi dari internet.
       - name: Setup SSH tunnel ke DB VPS
         run: |
-          # Buat folder .ssh
+          echo "[1] Membuat folder .ssh..."
           mkdir -p ~/.ssh
 
-          # Tulis private key dari GitHub Secret ke file
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-
-          # Set permission: hanya owner yang bisa baca (SSH requirement)
+          echo "[2] Menulis private key..."
+          # tr -d '\r' menghapus carriage return jika key dibuat di Windows
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          echo "    Key size: $(wc -c < ~/.ssh/id_rsa) bytes"
 
-          # Tambahkan fingerprint VPS ke known_hosts agar SSH tidak tanya konfirmasi
-          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+          echo "[3] Menjalankan ssh-keyscan..."
+          # Non-fatal: jika gagal, StrictHostKeyChecking=no di bawah sudah cukup
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>&1 \
+            || echo "    ssh-keyscan gagal (lanjut dengan StrictHostKeyChecking=no)"
+          echo "    known_hosts: $(wc -l < ~/.ssh/known_hosts) baris"
 
-          # Buka tunnel di background (-f) tanpa menjalankan command (-N)
-          # -L 5432:localhost:5432 = forward port lokal 5432 ke VPS:5432
-          # -o ServerAliveInterval=60 = kirim keepalive setiap 60 detik
+          echo "[4] Test autentikasi SSH..."
+          ssh -i ~/.ssh/id_rsa \
+              -v \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+              "echo 'SSH auth OK'" > /tmp/ssh-test.log 2>&1
+          SSH_EXIT=$?
+          cat /tmp/ssh-test.log
+          if [ $SSH_EXIT -ne 0 ]; then
+            echo "[4] GAGAL — lihat verbose log di atas"
+            exit 1
+          fi
+          echo "[4] Berhasil"
+
+          echo "[5] Membuka tunnel..."
           ssh -i ~/.ssh/id_rsa \
               -L 5432:localhost:5432 \
               -o ServerAliveInterval=60 \
               -o ServerAliveCountMax=10 \
+              -o StrictHostKeyChecking=no \
               -N -f \
               "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
 
-          # Tunggu sebentar agar tunnel benar-benar terbuka
           sleep 3
+          echo "[5] Tunnel SSH aktif"
 
-          echo "Tunnel SSH aktif"
-
-      # ── LANGKAH 6: Verifikasi tunnel berhasil ─────────────────────────
+      # ── LANGKAH 7: Verifikasi tunnel berhasil ─────────────────────────
       - name: Verifikasi koneksi tunnel
         run: |
           nc -z localhost 5432 && echo "Port 5432 terbuka via tunnel" || exit 1
-          # nc -z = cek apakah port bisa dikoneksi tanpa kirim data
-          # || exit 1 = gagalkan step ini jika port tidak terbuka
 
-      # ── LANGKAH 7: Buat file .env.test dari GitHub Secrets ────────────
-      # File .env.test tidak di-commit ke repo (ada di .gitignore)
-      # Kita rekonstruksi dari secrets setiap kali pipeline berjalan
+      # ── LANGKAH 8: Buat file .env.test dari GitHub Secrets ────────────
+      # File .env.test tidak di-commit (ada di .gitignore).
+      # Secrets dioper lewat env: block lalu dibaca sebagai shell variable.
+      # PENTING: heredoc delimiter TIDAK boleh diapit tanda kutip (bukan 'ENVEOF')
+      # agar shell variable seperti $DB_URL ter-expand dengan benar.
       - name: Buat file .env.test
+        env:
+          DB_URL: ${{ secrets.DATABASE_URL }}
+          BASE_URL: ${{ secrets.TEST_BASE_URL }}
+          ADMIN_EMAIL: ${{ secrets.TEST_ADMIN_EMAIL }}
+          ADMIN_PWD: ${{ secrets.TEST_ADMIN_PASSWORD }}
+          STUDENT_EMAIL: ${{ secrets.TEST_STUDENT_EMAIL }}
+          STUDENT_PWD: ${{ secrets.TEST_STUDENT_PASSWORD }}
+          LECTURER_EMAIL: ${{ secrets.TEST_LECTURER_EMAIL }}
+          LECTURER_PWD: ${{ secrets.TEST_LECTURER_PASSWORD }}
         run: |
-          cat > .env.test << 'ENVEOF'
-          DATABASE_URL=${{ secrets.DATABASE_URL }}
-          TEST_BASE_URL=${{ secrets.TEST_BASE_URL }}
-          TEST_ADMIN_EMAIL=${{ secrets.TEST_ADMIN_EMAIL }}
-          TEST_ADMIN_PASSWORD=${{ secrets.TEST_ADMIN_PASSWORD }}
-          TEST_STUDENT_EMAIL=${{ secrets.TEST_STUDENT_EMAIL }}
-          TEST_STUDENT_PASSWORD=${{ secrets.TEST_STUDENT_PASSWORD }}
-          TEST_LECTURER_EMAIL=${{ secrets.TEST_LECTURER_EMAIL }}
-          TEST_LECTURER_PASSWORD=${{ secrets.TEST_LECTURER_PASSWORD }}
+          cat > .env.test << ENVEOF
+          DATABASE_URL=$DB_URL
+          TEST_BASE_URL=$BASE_URL
+          TEST_ADMIN_EMAIL=$ADMIN_EMAIL
+          TEST_ADMIN_PASSWORD=$ADMIN_PWD
+          TEST_STUDENT_EMAIL=$STUDENT_EMAIL
+          TEST_STUDENT_PASSWORD=$STUDENT_PWD
+          TEST_LECTURER_EMAIL=$LECTURER_EMAIL
+          TEST_LECTURER_PASSWORD=$LECTURER_PWD
           ENVEOF
 
-      # ── LANGKAH 8: Jalankan API Tests ─────────────────────────────────
+      # ── LANGKAH 9: Jalankan API Tests ─────────────────────────────────
       - name: Run API Tests
         run: npm run test:api
         env:
-          CI: true              # Playwright membaca CI=true untuk mode headless
+          CI: true
 
-      # ── LANGKAH 9: Jalankan UI Tests (file bersih saja) ───────────────
+      # ── LANGKAH 10: Jalankan UI Tests ─────────────────────────────────
       - name: Run UI Tests
         run: npm run test:ui:clean
         env:
           CI: true
 
-      # ── LANGKAH 10: Upload laporan sebagai artifact ────────────────────
-      # Artifact = file yang disimpan di GitHub setelah job selesai
-      # Berguna untuk debug jika test gagal (lihat screenshot, video)
+      # ── LANGKAH 11: Upload laporan sebagai artifact ───────────────────
       - name: Upload test reports sebagai artifact
         uses: actions/upload-artifact@v4
-        if: always()            # Jalankan bahkan jika step sebelumnya gagal
+        if: always()
         with:
           name: playwright-reports-${{ github.run_number }}
           path: |
             playwright-report-api/
             playwright-report-ui/
             test-results/
-          retention-days: 14    # Simpan selama 14 hari
+          retention-days: 14
 
-      # ── LANGKAH 11: Deploy laporan ke GitHub Pages ────────────────────
-      # Hanya deploy jika push ke main (bukan dari pull request)
+      # ── LANGKAH 12: Deploy laporan ke GitHub Pages ────────────────────
+      # Hanya deploy jika push ke main (bukan dari pull request).
+      # Menggunakan --repo dengan token eksplisit karena gh-pages tidak
+      # otomatis membaca GITHUB_TOKEN dari environment.
       - name: Deploy laporan ke GitHub Pages
         if: github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Konfigurasi identitas git untuk commit gh-pages
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Deploy API report ke subfolder /api
           npx gh-pages \
             -d playwright-report-api \
             --dest api \
             --dotfiles \
-            --repo "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+            --repo "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
 
-          # Deploy UI report ke subfolder /ui
           npx gh-pages \
             -d playwright-report-ui \
             --dest ui \
             --dotfiles \
-            --repo "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # GITHUB_TOKEN adalah token otomatis dari GitHub, tidak perlu dibuat manual
+            --repo "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
+      # ── LANGKAH 13: Tutup SSH Tunnel ─────────────────────────────────
+      # if: always() memastikan cleanup berjalan meski step sebelumnya gagal
+      - name: Close SSH Tunnel
+        if: always()
+        run: |
+          pkill -f "ssh -i ~/.ssh/id_rsa -L 5432:localhost:5432" || true
 ```
 
 ### 8.3 Penjelasan struktur workflow
@@ -592,7 +636,23 @@ Setiap `step` bisa berupa:
 Laporan HTML akan dikirim ke branch `gh-pages` oleh `gh-pages` package.
 GitHub Pages perlu dikonfigurasi untuk membaca dari branch tersebut.
 
-### 9.1 Aktifkan GitHub Pages
+> **Urutan yang benar:**
+> Branch `gh-pages` baru terbuat setelah pipeline pertama berjalan.
+> Karena itu lakukan **9.2 dulu → Langkah 10 (push & run pipeline) → baru 9.1**.
+
+### 9.2 Aktifkan izin untuk GitHub Actions (lakukan SEBELUM push pertama)
+
+Agar workflow bisa push ke branch `gh-pages`:
+
+1. Buka repository di GitHub
+2. Klik tab **Settings** → di sidebar klik **Actions** → **General**
+3. Scroll ke bawah ke bagian **Workflow permissions**
+4. Pilih **Read and write permissions**
+5. Klik **Save**
+
+### 9.1 Aktifkan GitHub Pages (lakukan SETELAH pipeline pertama selesai)
+
+Branch `gh-pages` baru muncul di dropdown setelah pipeline pertama sukses deploy.
 
 1. Buka repository di GitHub
 2. Klik tab **Settings**
@@ -601,15 +661,6 @@ GitHub Pages perlu dikonfigurasi untuk membaca dari branch tersebut.
    - Branch: `gh-pages`
    - Folder: `/ (root)`
 5. Klik **Save**
-
-### 9.2 Aktifkan izin untuk GitHub Actions
-
-Agar workflow bisa push ke branch `gh-pages`:
-
-1. Masih di **Settings** → di sidebar klik **Actions** → **General**
-2. Scroll ke bawah ke bagian **Workflow permissions**
-3. Pilih **Read and write permissions**
-4. Klik **Save**
 
 ### 9.3 URL laporan setelah deploy
 
@@ -665,10 +716,17 @@ git push origin main
 Klik nama step untuk expand log-nya. Contoh log sukses step tunnel:
 
 ```
-Run ssh -i ~/.ssh/id_rsa -L 5432:localhost:5432 ...
-Tunnel SSH aktif
+[1] Membuat folder .ssh...
+[2] Menulis private key...
+    Key size: 419 bytes
+[3] Menjalankan ssh-keyscan...
+    known_hosts: 1 baris
+[4] Test autentikasi SSH...
+SSH auth OK
+[4] Berhasil
+[5] Membuka tunnel...
+[5] Tunnel SSH aktif
 
-Run nc -z localhost 5432 && echo "Port 5432 terbuka via tunnel" || exit 1
 Port 5432 terbuka via tunnel
 ```
 
@@ -782,18 +840,87 @@ Error: locator.fill: value: expected string, got undefined
 
 ---
 
+### Masalah: SSH exit code 255 — tunnel gagal terkoneksi
+
+**Gejala di log:**
+```
+[3] ssh-keyscan gagal
+    known_hosts: 0 baris
+[4] Test autentikasi SSH...
+Error: Process completed with exit code 255.
+```
+
+**Penyebab:** GitHub Actions runner tidak bisa menjangkau VPS di port 22.
+Exit code 255 = koneksi gagal total (bukan masalah key).
+
+**Solusi:** Buka port 22 di firewall VPS:
+
+```bash
+# Di VPS — jika pakai ufw:
+sudo ufw allow 22/tcp
+sudo ufw status
+
+# Verifikasi dari laptop:
+# Windows PowerShell:
+Test-NetConnection -ComputerName IP_VPS -Port 22
+# Harus: TcpTestSucceeded : True
+```
+
+Jika VPS di cloud (DigitalOcean, AWS, GCP, dll): tambahkan rule di
+Security Group / Firewall dashboard — **Port 22, TCP, Source: 0.0.0.0/0**.
+
+---
+
 ### Masalah: "gh-pages deploy gagal"
 
 **Gejala:**
 ```
 fatal: could not read Username for 'https://github.com': No such device or address
+ProcessError: fatal: could not read Username...
 ```
 
-**Penyebab:** Izin write untuk GitHub Actions belum diaktifkan.
+**Penyebab ada dua — cek keduanya:**
 
-**Solusi:**
-1. Settings → Actions → General → Workflow permissions
-2. Pilih **Read and write permissions** → Save
+1. **Izin write belum diaktifkan:**
+   - Settings → Actions → General → Workflow permissions
+   - Pilih **Read and write permissions** → Save
+
+2. **gh-pages tidak membaca `GITHUB_TOKEN` dari environment secara otomatis.**
+   Pastikan workflow memakai `--repo` dengan token eksplisit:
+   ```yaml
+   env:
+     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+   run: |
+     npx gh-pages \
+       -d playwright-report-api \
+       --dest api \
+       --dotfiles \
+       --repo "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+   ```
+   Perhatikan: gunakan `${GITHUB_TOKEN}` (shell variable), bukan
+   `${{ secrets.GITHUB_TOKEN }}` (agar nilai token tidak ter-print di log script).
+
+---
+
+### Masalah: "Node.js 20 actions are deprecated"
+
+**Gejala di log:**
+```
+Node.js 20 actions are deprecated. The following actions are running on
+Node.js 20: actions/cache@v4, actions/checkout@v4 ...
+```
+
+**Penyebab:** GitHub Actions mewajibkan Node.js 24 mulai Juni 2026.
+
+**Solusi:** Tambahkan env var di level `jobs` dalam workflow:
+```yaml
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  e2e-tests:
+    ...
+```
 
 ---
 
@@ -824,12 +951,19 @@ GitHub Actions Runner mulai
         │
         ├─── Checkout kode
         ├─── Install Node.js & npm ci
-        ├─── Install Playwright Chromium
+        ├─── Cache Playwright Binaries (hemat ~1-2 menit jika cache hit)
+        ├─── Install Playwright Chromium (skip jika cache hit)
         │
         ├─── Setup SSH Tunnel ──────────────────────────────────────┐
+        │    [1] Tulis private key (tr -d '\r' untuk Windows compat) │
+        │    [2] ssh-keyscan (non-fatal)                            │
+        │    [3] Test auth SSH dengan verbose log                   │
+        │    [4] Buka tunnel di background (-N -f)                  │
         │    localhost:5432 (runner) ←──SSH──→ localhost:5432 (VPS) │
         │                                                           │
-        ├─── Buat .env.test dari Secrets                           │
+        ├─── Verifikasi port 5432 terbuka                          │
+        │                                                           │
+        ├─── Buat .env.test dari Secrets (heredoc tanpa kutip)     │
         │                                                           │
         ├─── npm run test:api ──────────────────────────────────────┤
         │    ├── setup-admin: login → simpan admin.json            │
@@ -843,9 +977,11 @@ GitHub Actions Runner mulai
         │
         ├─── Upload artifacts (selalu, termasuk saat gagal)
         │
-        └─── Deploy ke GitHub Pages (hanya jika push ke main)
-             ├── playwright-report-api/ → /api/
-             └── playwright-report-ui/ → /ui/
+        ├─── Deploy ke GitHub Pages (hanya jika push ke main)
+        │    ├── playwright-report-api/ → /api/
+        │    └── playwright-report-ui/ → /ui/
+        │
+        └─── Close SSH Tunnel (if: always — cleanup)
 ```
 
 ---
