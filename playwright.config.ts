@@ -40,10 +40,10 @@ export default defineConfig({
 	use: {
 		/* Base URL to use in actions like `await page.goto('')`. */
 		baseURL: process.env.TEST_BASE_URL ?? 'http://localhost:3000',
-		// headless: !!process.env.CI,
-		// launchOptions: {
-		// 	slowMo: process.env.CI ? 0 : 1000,
-		// },
+		headless: !!process.env.CI,
+		launchOptions: {
+			slowMo: process.env.CI ? 0 : 1000,
+		},
 
 		/* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
 		/* Ambil trace dan screenshot HANYA jika test gagal */
