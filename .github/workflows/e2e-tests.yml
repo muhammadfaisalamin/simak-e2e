@@ -151,12 +151,14 @@ jobs:
           npx gh-pages \
             -d playwright-report-api \
             --dest api \
-            --dotfiles
+            --dotfiles \
+            --repo "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
 
           npx gh-pages \
             -d playwright-report-ui \
             --dest ui \
-            --dotfiles
+            --dotfiles \
+            --repo "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
 
       # ── LANGKAH 13: Tutup SSH Tunnel (Pembersihan) ────────────────────
       - name: Close SSH Tunnel
