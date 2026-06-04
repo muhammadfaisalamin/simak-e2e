@@ -51,16 +51,20 @@ jobs:
       # ── LANGKAH 6: Setup SSH Tunnel ke database VPS ───────────────────
       - name: Setup SSH tunnel ke DB VPS
         run: |
+          echo "[1] Membuat folder .ssh..."
           mkdir -p ~/.ssh
 
-          # Tulis private key — hapus carriage return (\r) jika key disimpan di Windows
-          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          echo "[2] Menulis private key..."
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          echo "    Key size: $(wc -c < ~/.ssh/id_rsa) bytes"
 
-          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+          echo "[3] Menjalankan ssh-keyscan..."
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>&1 \
+            || echo "    ssh-keyscan gagal (lanjut dengan StrictHostKeyChecking=no)"
+          echo "    known_hosts: $(wc -l < ~/.ssh/known_hosts) baris"
 
-          # Test autentikasi SSH dengan verbose — output ke file lalu print
-          echo "Menguji koneksi SSH..."
+          echo "[4] Test autentikasi SSH..."
           ssh -i ~/.ssh/id_rsa \
               -v \
               -o BatchMode=yes \
@@ -71,11 +75,12 @@ jobs:
           SSH_EXIT=$?
           cat /tmp/ssh-test.log
           if [ $SSH_EXIT -ne 0 ]; then
-            echo "SSH auth GAGAL — lihat verbose log di atas"
+            echo "[4] GAGAL — lihat verbose log di atas"
             exit 1
           fi
+          echo "[4] Berhasil"
 
-          # Buka tunnel di background
+          echo "[5] Membuka tunnel..."
           ssh -i ~/.ssh/id_rsa \
               -L 5432:localhost:5432 \
               -o ServerAliveInterval=60 \
@@ -85,7 +90,7 @@ jobs:
               "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
 
           sleep 3
-          echo "Tunnel SSH aktif"
+          echo "[5] Tunnel SSH aktif"
 
       # ── LANGKAH 7: Verifikasi tunnel berhasil ─────────────────────────
       - name: Verifikasi koneksi tunnel
