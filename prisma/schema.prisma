@@ -1,0 +1,620 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Role {
+  id             Int              @id @default(autoincrement())
+  name           String?          @unique
+  description    String?
+  rolePermission RolePermission[]
+  user           User[]
+  roleType       RoleType         @default(OPERATOR)
+
+  @@map("sb25_roles")
+}
+
+model Permission {
+  id             Int              @id @default(autoincrement())
+  name           String?          @unique
+  description    String?
+  rolePermission RolePermission[]
+
+  @@map("sb25_permissions")
+}
+
+model RolePermission {
+  roleId       Int
+  role         Role?       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId Int
+  permission   Permission? @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@id([roleId, permissionId])
+  @@map("sb25_role_permissions")
+}
+
+model User {
+  id       String    @id @default(uuid())
+  email    String?   @unique
+  password String?
+  isStatus Boolean?  @default(false)
+  roleId   Int?
+  role     Role?     @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  lecturer Lecturer?
+  operator Operator?
+  student  Student?
+  session  Session[]
+
+  @@map("sb25_users")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("sb25_sessions")
+}
+
+model Major {
+  id         Int          @id @default(autoincrement())
+  name       String?
+  numberCode Int?         @unique
+  stringCode String?      @unique
+  course     Course[]
+  lecturer   Lecturer[]
+  student    Student[]
+  curriculum Curriculum[]
+
+  @@map("sb25_majors")
+}
+
+model Course {
+  id           String      @id @default(uuid())
+  name         String?
+  code         String?     @unique
+  sks          Int?
+  majorId      Int?
+  isPKL        Boolean     @default(false)
+  isSkripsi    Boolean     @default(false)
+  major        Major?      @relation(fields: [majorId], references: [id], onDelete: Restrict)
+  courseType   String?
+  createdAt    DateTime    @default(now())
+  assessmentId String?
+  assessment   Assessment? @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+
+  predecessorId    String?            @unique
+  predecessor      Course?            @relation("CourseHistory", fields: [predecessorId], references: [id], onDelete: Restrict)
+  successor        Course?            @relation("CourseHistory")
+  curriculumDetail CurriculumDetail[]
+  academicClass    AcademicClass[]
+  krsDetail        KrsDetail[]
+  khsDetail        KhsDetail[]
+
+  @@unique([majorId, name, sks], name: "unique_name_sks_per_major")
+  @@map("sb25_courses")
+}
+
+model Assessment {
+  id               String             @id @default(uuid())
+  name             String?            @unique
+  assessmentDetail AssessmentDetail[]
+  course           Course[]
+
+  @@map("sb25_assessments")
+}
+
+model GradeComponent {
+  id               String             @id @default(uuid())
+  name             String?            @unique
+  acronym          String?            @unique
+  assessmentDetail AssessmentDetail[]
+
+  @@map("sb25_grade_components")
+}
+
+model AssessmentDetail {
+  id           String          @id @default(uuid())
+  seq_number   Int             @default(autoincrement())
+  assessmentId String?
+  assessment   Assessment?     @relation(fields: [assessmentId], references: [id], onDelete: Restrict)
+  gradeId      String?
+  grade        GradeComponent? @relation(fields: [gradeId], references: [id], onDelete: Restrict)
+  percentage   Int?
+  khsGrade     KhsGrade[]
+
+  @@map("sb25_assessments_details")
+}
+
+model Curriculum {
+  id               String             @id @default(uuid())
+  name             String?            @unique
+  majorId          Int?
+  major            Major?             @relation(fields: [majorId], references: [id], onDelete: Restrict)
+  startDate        DateTime?
+  endDate          DateTime?
+  isActive         Boolean?           @default(false)
+  curriculumDetail CurriculumDetail[]
+
+  @@map("sb25_curriculums")
+}
+
+model CurriculumDetail {
+  id           String     @id @default(uuid())
+  curriculumId String
+  curriculum   Curriculum @relation(fields: [curriculumId], references: [id], onDelete: Restrict)
+  courseId     String
+  course       Course     @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  semester     Int?
+
+  @@map("sb25_curriculum_details")
+}
+
+model Lecturer {
+  id               String             @id @default(uuid())
+  npk              String?            @unique
+  nidn             String?            @unique
+  nuptk            String?            @unique
+  name             String?
+  frontTitle       String?
+  backTitle        String?
+  degree           DegreeStatus?
+  year             Int?
+  religion         Religion?
+  gender           Gender?
+  address          String?
+  email            String?
+  hp               String?
+  photo            String?
+  majorId          Int?
+  major            Major?             @relation(fields: [majorId], references: [id], onDelete: Restrict)
+  userId           String?            @unique
+  user             User?              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  student          Student[]
+  reregisterDetail ReregisterDetail[]
+  krs              Krs[]
+  academicClass    AcademicClass[]
+
+  @@map("sb25_lecturers")
+}
+
+model Operator {
+  id         String  @id @default(uuid())
+  name       String?
+  department String?
+  userId     String? @unique
+  user       User?   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@map("sb25_operators")
+}
+
+model Student {
+  id                  String                @id @default(uuid())
+  nim                 String?               @unique
+  name                String?
+  year                Int?
+  religion            Religion?
+  gender              Gender?
+  address             String?
+  placeOfBirth        String?
+  birthday            DateTime?
+  domicile            String?
+  email               String?
+  hp                  String?
+  photo               String?
+  statusRegister      StatusRegister        @default(BARU)
+  motherName          String?
+  motherNIK           String?
+  guardianName        String?
+  guardianNIK         String?
+  guardianHp          String?
+  guardianJob         String?
+  guardianAddress     String?
+  studentStatus       StudentStatus         @default(NONAKTIF)
+  majorId             Int?
+  major               Major?                @relation(fields: [majorId], references: [id], onDelete: Restrict)
+  lecturerId          String?
+  lecturer            Lecturer?             @relation(fields: [lecturerId], references: [id], onDelete: Restrict)
+  userId              String?               @unique
+  user                User?                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  reregisterDetail    ReregisterDetail[]
+  krs                 Krs[]
+  academicClassDetail AcademicClassDetail[]
+  khs                 Khs[]
+
+  @@map("sb25_students")
+}
+
+model Position {
+  id           String  @id @default(uuid())
+  positionName String? @unique
+  personName   String?
+
+  @@map("sb25_position")
+}
+
+model Room {
+  id              Int              @id @default(autoincrement())
+  name            String?
+  location        Location?
+  capacity        Int?
+  scheduleDetails ScheduleDetail[]
+
+  @@map("sb25_rooms")
+}
+
+model Period {
+  id            String          @id @default(uuid())
+  year          Int?
+  semesterType  SemesterType?
+  name          String?         @unique
+  isActive      Boolean?        @default(false)
+  reregister    Reregister[]
+  academicClass AcademicClass[]
+  schedule      Schedule[]
+  khs           Khs[]
+
+  @@map("sb25_periods")
+}
+
+model Reregister {
+  id                 String             @id @default(uuid())
+  name               String?
+  periodId           String?
+  period             Period?            @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  isReregisterActive Boolean?           @default(false)
+  reregisterDetail   ReregisterDetail[]
+  krs                Krs[]
+
+  @@map("sb25_reregisters")
+}
+
+model ReregisterDetail {
+  reregisterId       String
+  reregister         Reregister     @relation(fields: [reregisterId], references: [id], onDelete: Cascade)
+  studentId          String
+  student            Student        @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  nominal            Int?
+  paymentReceiptFile String?
+  paymentStatus      PaymentStatus  @default(BELUM_LUNAS)
+  semester           Int?
+  semesterStatus     SemesterStatus @default(NONAKTIF)
+  campusType         CampusType?
+  lecturerId         String?
+  lecturer           Lecturer?      @relation(fields: [lecturerId], references: [id], onDelete: SetNull)
+  paymentDescription String?
+
+  // untuk memeriksa apakah student sudah mengisi data
+  isStatusForm Boolean @default(false)
+  Krs          Krs?
+
+  @@id([reregisterId, studentId])
+  @@map("sb25_reregister_details")
+}
+
+model Krs {
+  id               String           @id @default(uuid())
+  reregisterId     String
+  reregister       Reregister       @relation(fields: [reregisterId], references: [id], onDelete: Restrict)
+  studentId        String
+  student          Student          @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  reregisterDetail ReregisterDetail @relation(fields: [reregisterId, studentId], references: [reregisterId, studentId], onDelete: Cascade)
+  maxSks           Int?
+  ips              Decimal          @default(0) @db.Decimal(3, 2)
+  lecturerId       String?
+  lecturer         Lecturer?        @relation(fields: [lecturerId], references: [id], onDelete: Restrict)
+  isStatusForm     StudyPlanStatus  @default(DRAFT)
+  krsDetail        KrsDetail[]
+  khs              Khs?
+  KrsOverride      KrsOverride?
+
+  @@unique([reregisterId, studentId])
+  @@map("sb25_krs")
+}
+
+model KrsOverride {
+  id          String   @id @default(uuid())
+  krsId       String   @unique
+  krs         Krs      @relation(fields: [krsId], references: [id], onDelete: Cascade)
+  ips_allowed Decimal  @default(0) @db.Decimal(3, 2)
+  sks_allowed Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@map("sb25_krs_override")
+}
+
+model KrsDetail {
+  id       String  @id @default(uuid())
+  krsId    String
+  krs      Krs     @relation(fields: [krsId], references: [id], onDelete: Cascade)
+  courseId String
+  course   Course  @relation(fields: [courseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  isAcc    Boolean @default(false)
+
+  @@unique([krsId, courseId])
+  @@map("sb25_krs_details")
+}
+
+model KrsRule {
+  id                   String         @id @default(uuid())
+  statusRegister       StatusRegister @default(BARU)
+  semester             Int            @default(1)
+  maxSks               Int            @default(0)
+  autoPackage          Boolean        @default(false)
+  allowManualSelection Boolean        @default(false)
+  isActive             Boolean        @default(false)
+
+  @@map("sb25_krs_rules")
+}
+
+model AcademicClass {
+  id                  String                @id @default(uuid())
+  name                String?
+  periodId            String?
+  period              Period?               @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  lecturerId          String?
+  lecturer            Lecturer?             @relation(fields: [lecturerId], references: [id], onDelete: Restrict)
+  courseId            String?
+  course              Course?               @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  semester            Int?
+  scheduleDetail      ScheduleDetail[]
+  academicClassDetail AcademicClassDetail[]
+  presence            Presence[]
+
+  @@unique([periodId, name, courseId], name: "unique_class_per_course")
+  @@map("sb25_academic_classes")
+}
+
+model AcademicClassDetail {
+  id              String           @id @default(uuid())
+  academicClassId String?
+  academicClass   AcademicClass?   @relation(fields: [academicClassId], references: [id], onDelete: Cascade)
+  studentId       String?
+  student         Student?         @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  presenceDetail  PresenceDetail[]
+
+  @@map("sb25_academic_class_detail")
+}
+
+model Presence {
+  id               String           @id @default(uuid())
+  academicClassId  String?
+  academicClass    AcademicClass?   @relation(fields: [academicClassId], references: [id], onDelete: Restrict)
+  weekNumber       Int?
+  date             DateTime?
+  duration         String?
+  learningMethod   String?
+  lesson           String?
+  lessonDetail     String?
+  isActive         Boolean?         @default(false)
+  presenceDuration String?
+  activatedAt      DateTime?
+  presenceDetail   PresenceDetail[]
+
+  @@map("sb25_presences")
+}
+
+model PresenceDetail {
+  id                    String               @id @default(uuid())
+  presenceId            String?
+  presence              Presence?            @relation(fields: [presenceId], references: [id], onDelete: Cascade)
+  academicClassDetailId String?
+  academicClassDetail   AcademicClassDetail? @relation(fields: [academicClassDetailId], references: [id], onDelete: Restrict)
+  presenceStatus        PresenceStatus       @default(ALPA)
+
+  @@map("sb25_presence_details")
+}
+
+model Time {
+  id             String           @id @default(uuid())
+  timeStart      DateTime?        @db.Time()
+  timeFinish     DateTime?        @db.Time()
+  scheduleDetail ScheduleDetail[]
+
+  @@unique([timeStart, timeFinish])
+  @@map("sb25_times")
+}
+
+model Schedule {
+  id             String           @id @default(uuid())
+  periodId       String?
+  period         Period?          @relation(fields: [periodId], references: [id])
+  name           String?
+  isActive       Boolean?         @default(false)
+  scheduleDetail ScheduleDetail[]
+
+  @@map("sb25_schedules")
+}
+
+model ScheduleDetail {
+  id              String         @id @default(uuid())
+  scheduleId      String
+  schedule        Schedule       @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  academicClassId String?
+  academicClass   AcademicClass? @relation(fields: [academicClassId], references: [id], onDelete: Restrict)
+  dayName         Day            @default(MINGGU)
+  timeId          String?
+  time            Time?          @relation(fields: [timeId], references: [id], onDelete: Restrict)
+  roomId          Int?
+  room            Room?          @relation(fields: [roomId], references: [id], onDelete: Restrict)
+
+  @@unique([academicClassId, timeId])
+  @@map("sb25_schedule_details")
+}
+
+model Khs {
+  id        String      @id @default(uuid())
+  krsId     String?     @unique
+  krs       Krs?        @relation(fields: [krsId], references: [id], onDelete: Cascade)
+  studentId String
+  student   Student     @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  periodId  String
+  period    Period      @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  semester  Int?        @default(1)
+  ips       Decimal?    @default(0) @db.Decimal(3, 2)
+  maxSks    Int?
+  date      DateTime?
+  isRPL     Boolean     @default(false)
+  khsDetail KhsDetail[]
+
+  @@map("sb25_khs")
+}
+
+model KhsDetail {
+  id          String          @id @default(uuid())
+  khsId       String
+  khs         Khs             @relation(fields: [khsId], references: [id], onDelete: Cascade)
+  courseId    String
+  course      Course          @relation(fields: [courseId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  finalScore  Decimal         @default(0) @db.Decimal(5, 2)
+  weight      Decimal         @default(0) @db.Decimal(2, 1)
+  gradeLetter String          @default("E")
+  status      AnnouncementKhs @default(DRAFT)
+
+  // data versioning untuk revisi
+  version       Int        @default(0)
+  isLatest      Boolean    @default(true)
+  validFrom     DateTime   @default(now())
+  validTo       DateTime?
+  predecessorId String?    @unique
+  predecessor   KhsDetail? @relation("khsDetailHistory", fields: [predecessorId], references: [id], onDelete: Cascade)
+  successor     KhsDetail? @relation("khsDetailHistory")
+  khsGrade      KhsGrade[]
+
+  @@unique([khsId, courseId, version])
+  @@map("sb25_khs_details")
+}
+
+model KhsGrade {
+  id                 String           @id @default(uuid())
+  khsDetailId        String
+  khsDetail          KhsDetail        @relation(fields: [khsDetailId], references: [id], onDelete: Cascade)
+  assessmentDetailId String
+  assessmentDetail   AssessmentDetail @relation(fields: [assessmentDetailId], references: [id], onDelete: Restrict)
+  percentage         Int              @default(0)
+  score              Int              @default(0)
+
+  @@map("sb25_khs_grades")
+}
+
+enum AnnouncementKhs {
+  DRAFT
+  SUBMITTED
+  ANNOUNCEMENT
+}
+
+enum PresenceStatus {
+  HADIR
+  IZIN
+  SAKIT
+  ALPA
+}
+
+enum Day {
+  SENIN
+  SELASA
+  RABU
+  KAMIS
+  JUMAT
+  SABTU
+  MINGGU
+}
+
+enum StudyPlanStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  NEED_REVISION
+}
+
+enum SemesterType {
+  GANJIL
+  GENAP
+  GANJIL_PENDEK
+  GENAP_PENDEK
+}
+
+enum Gender {
+  PRIA
+  WANITA
+}
+
+enum Religion {
+  ISLAM
+  KATOLIK
+  PROTESTAN
+  BUDDHA
+  HINDU
+  KONGHUCU
+  DLL
+}
+
+enum StudentStatus {
+  AKTIF
+  NONAKTIF
+  CUTI
+  DO
+  MENGUNDURKAN_DIRI
+  LULUS
+}
+
+enum StatusRegister {
+  BARU
+  TRANSFER_KREDIT
+  RENIM
+  PEROLEHAN_KREDIT
+}
+
+enum SemesterStatus {
+  AKTIF
+  NONAKTIF
+  CUTI
+  DO
+  MENGUNDURKAN_DIRI
+  LULUS
+}
+
+enum CampusType {
+  BJB
+  BJM
+  SORE
+  ONLINE
+}
+
+enum Location {
+  BJB
+  BJM
+}
+
+enum PaymentStatus {
+  LUNAS
+  BELUM_LUNAS
+}
+
+enum DegreeStatus {
+  S1
+  S2
+  S3
+}
+
+enum RoleType {
+  STUDENT
+  LECTURER
+  ADVISOR
+  OPERATOR
+}
+
+
+

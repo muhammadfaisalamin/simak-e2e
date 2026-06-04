@@ -1,0 +1,172 @@
+name: E2E Tests SIMAK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # ── LANGKAH 1: Ambil kode dari repository ─────────────────────────
+      - name: Checkout kode
+        uses: actions/checkout@v4
+
+      # ── LANGKAH 2: Install Node.js & Set Up Cache node_modules ────────
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # ── LANGKAH 3: Install semua dependencies (Reproducible) ──────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── LANGKAH 4: Cache Playwright Binaries (Menghemat Waktu Unduh) ──
+      - name: Cache Playwright Binaries
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
+
+      # ── LANGKAH 5: Install Browser / Dependensi Sistem ────────────────
+      - name: Install Playwright Chromium (Cache Miss)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install chromium --with-deps
+
+      - name: Install Playwright System Dependencies Only (Cache Hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # ── LANGKAH 6: Setup SSH Tunnel ke database VPS ───────────────────
+      - name: Setup SSH tunnel ke DB VPS
+        run: |
+          echo "[1] Membuat folder .ssh..."
+          mkdir -p ~/.ssh
+
+          echo "[2] Menulis private key..."
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo "    Key size: $(wc -c < ~/.ssh/id_rsa) bytes"
+
+          echo "[3] Menjalankan ssh-keyscan..."
+          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>&1 \
+            || echo "    ssh-keyscan gagal (lanjut dengan StrictHostKeyChecking=no)"
+          echo "    known_hosts: $(wc -l < ~/.ssh/known_hosts) baris"
+
+          echo "[4] Test autentikasi SSH..."
+          ssh -i ~/.ssh/id_rsa \
+              -v \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              -o StrictHostKeyChecking=no \
+              "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+              "echo 'SSH auth OK'" > /tmp/ssh-test.log 2>&1
+          SSH_EXIT=$?
+          cat /tmp/ssh-test.log
+          if [ $SSH_EXIT -ne 0 ]; then
+            echo "[4] GAGAL — lihat verbose log di atas"
+            exit 1
+          fi
+          echo "[4] Berhasil"
+
+          echo "[5] Membuka tunnel..."
+          ssh -i ~/.ssh/id_rsa \
+              -L 5432:localhost:5432 \
+              -o ServerAliveInterval=60 \
+              -o ServerAliveCountMax=10 \
+              -o StrictHostKeyChecking=no \
+              -N -f \
+              "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
+
+          sleep 3
+          echo "[5] Tunnel SSH aktif"
+
+      # ── LANGKAH 7: Verifikasi tunnel berhasil ─────────────────────────
+      - name: Verifikasi koneksi tunnel
+        run: |
+          nc -z localhost 5432 && echo "Port 5432 terbuka via tunnel" || exit 1
+
+      # ── LANGKAH 8: Buat file .env.test dari GitHub Secrets ────────────
+      - name: Buat file .env.test
+        env:
+          DB_URL: ${{ secrets.DATABASE_URL }}
+          BASE_URL: ${{ secrets.TEST_BASE_URL }}
+          ADMIN_EMAIL: ${{ secrets.TEST_ADMIN_EMAIL }}
+          ADMIN_PWD: ${{ secrets.TEST_ADMIN_PASSWORD }}
+          STUDENT_EMAIL: ${{ secrets.TEST_STUDENT_EMAIL }}
+          STUDENT_PWD: ${{ secrets.TEST_STUDENT_PASSWORD }}
+          LECTURER_EMAIL: ${{ secrets.TEST_LECTURER_EMAIL }}
+          LECTURER_PWD: ${{ secrets.TEST_LECTURER_PASSWORD }}
+        run: |
+          cat > .env.test << ENVEOF
+          DATABASE_URL=$DB_URL
+          TEST_BASE_URL=$BASE_URL
+          TEST_ADMIN_EMAIL=$ADMIN_EMAIL
+          TEST_ADMIN_PASSWORD=$ADMIN_PWD
+          TEST_STUDENT_EMAIL=$STUDENT_EMAIL
+          TEST_STUDENT_PASSWORD=$STUDENT_PWD
+          TEST_LECTURER_EMAIL=$LECTURER_EMAIL
+          TEST_LECTURER_PASSWORD=$LECTURER_PWD
+          ENVEOF
+
+      # ── LANGKAH 9: Jalankan API Tests ─────────────────────────────────
+      - name: Run API Tests
+        run: npm run test:api
+        env:
+          CI: true
+
+      # ── LANGKAH 10: Jalankan UI Tests ─────────────────────────────────
+      - name: Run UI Tests
+        run: npm run test:ui:clean
+        env:
+          CI: true
+
+      # ── LANGKAH 11: Upload laporan sebagai artifact ───────────────────
+      - name: Upload test reports sebagai artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-reports-${{ github.run_number }}
+          path: |
+            playwright-report-api/
+            playwright-report-ui/
+            test-results/
+          retention-days: 14
+
+      # ── LANGKAH 12: Deploy laporan ke GitHub Pages ────────────────────
+      - name: Deploy laporan ke GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          npx gh-pages \
+            -d playwright-report-api \
+            --dest api \
+            --dotfiles \
+            --repo "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
+          npx gh-pages \
+            -d playwright-report-ui \
+            --dest ui \
+            --dotfiles \
+            --repo "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+
+      # ── LANGKAH 13: Tutup SSH Tunnel (Pembersihan) ────────────────────
+      - name: Close SSH Tunnel
+        if: always()
+        run: |
+          pkill -f "ssh -i ~/.ssh/id_rsa -L 5432:localhost:5432" || true
