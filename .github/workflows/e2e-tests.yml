@@ -16,89 +16,106 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      # ── LANGKAH 1: Ambil kode dari repository ─────────────────────────
-      - name: Checkout kode
+      # ── STEP 1: Checkout repository code ──────────────────────────────
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # ── LANGKAH 2: Install Node.js & Set Up Cache node_modules ────────
+      # ── STEP 2: Install Node.js & cache node_modules ──────────────────
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
 
-      # ── LANGKAH 3: Install semua dependencies (Reproducible) ──────────
+      # ── STEP 3: Install all dependencies (reproducible) ───────────────
       - name: Install dependencies
         run: npm ci
 
-      # ── LANGKAH 4: Cache Playwright Binaries (Menghemat Waktu Unduh) ──
-      - name: Cache Playwright Binaries
+      # ── STEP 4: Cache Playwright binaries ─────────────────────────────
+      - name: Cache Playwright binaries
         id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('**/package-lock.json') }}
 
-      # ── LANGKAH 5: Install Browser / Dependensi Sistem ────────────────
-      - name: Install Playwright Chromium (Cache Miss)
+      # ── STEP 5: Install Chromium browser / system dependencies ────────
+      - name: Install Playwright Chromium (cache miss)
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install chromium --with-deps
 
-      - name: Install Playwright System Dependencies Only (Cache Hit)
+      - name: Install Playwright system dependencies only (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
 
-      # ── LANGKAH 6: Setup SSH Tunnel ke database VPS ───────────────────
-      - name: Setup SSH tunnel ke DB VPS
+      # ── STEP 6: Set up SSH tunnel to database VPS ─────────────────────
+      - name: Set up SSH tunnel to DB VPS
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
         run: |
-          echo "[1] Membuat folder .ssh..."
+          echo "[1] Creating .ssh directory..."
           mkdir -p ~/.ssh
 
-          echo "[2] Menulis private key..."
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > ~/.ssh/id_rsa
+          echo "[2] Writing private key..."
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           echo "    Key size: $(wc -c < ~/.ssh/id_rsa) bytes"
 
-          echo "[3] Menjalankan ssh-keyscan..."
-          ssh-keyscan -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>&1 \
-            || echo "    ssh-keyscan gagal (lanjut dengan StrictHostKeyChecking=no)"
-          echo "    known_hosts: $(wc -l < ~/.ssh/known_hosts) baris"
+          echo "[3] Pre-connectivity check on ${SSH_HOST}:${SSH_PORT}..."
+          if ! nc -zv -w 10 "$SSH_HOST" "$SSH_PORT" 2>&1; then
+            echo "    ERROR: Cannot reach ${SSH_HOST}:${SSH_PORT}"
+            echo "    Check that:"
+            echo "      - Secret SSH_HOST is correct"
+            echo "      - Secret SSH_PORT matches the VPS SSH port (default 22)"
+            echo "      - The VPS firewall allows inbound connections on that port"
+            exit 1
+          fi
+          echo "    Host reachable on port ${SSH_PORT}"
 
-          echo "[4] Test autentikasi SSH..."
+          echo "[4] Running ssh-keyscan..."
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>&1 \
+            || echo "    ssh-keyscan failed — continuing with StrictHostKeyChecking=no"
+          echo "    known_hosts: $(wc -l < ~/.ssh/known_hosts) lines"
+
+          echo "[5] Testing SSH authentication..."
           ssh -i ~/.ssh/id_rsa \
+              -p "$SSH_PORT" \
               -v \
               -o BatchMode=yes \
               -o ConnectTimeout=15 \
               -o StrictHostKeyChecking=no \
-              "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+              "${SSH_USER}@${SSH_HOST}" \
               "echo 'SSH auth OK'" > /tmp/ssh-test.log 2>&1
           SSH_EXIT=$?
           cat /tmp/ssh-test.log
           if [ $SSH_EXIT -ne 0 ]; then
-            echo "[4] GAGAL — lihat verbose log di atas"
+            echo "[5] FAILED — see verbose log above"
             exit 1
           fi
-          echo "[4] Berhasil"
+          echo "[5] Authentication successful"
 
-          echo "[5] Membuka tunnel..."
+          echo "[6] Opening SSH tunnel..."
           ssh -i ~/.ssh/id_rsa \
+              -p "$SSH_PORT" \
               -L 5432:localhost:5432 \
               -o ServerAliveInterval=60 \
               -o ServerAliveCountMax=10 \
               -o StrictHostKeyChecking=no \
               -N -f \
-              "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}"
+              "${SSH_USER}@${SSH_HOST}"
 
           sleep 3
-          echo "[5] Tunnel SSH aktif"
+          echo "[6] SSH tunnel is active"
 
-      # ── LANGKAH 7: Verifikasi tunnel berhasil ─────────────────────────
-      - name: Verifikasi koneksi tunnel
+      # ── STEP 7: Verify tunnel is open ─────────────────────────────────
+      - name: Verify tunnel connection
         run: |
-          nc -z localhost 5432 && echo "Port 5432 terbuka via tunnel" || exit 1
+          nc -z localhost 5432 && echo "Port 5432 is open via tunnel" || exit 1
 
-      # ── LANGKAH 8: Buat file .env.test dari GitHub Secrets ────────────
-      - name: Buat file .env.test
+      # ── STEP 8: Write .env.test from GitHub Secrets ───────────────────
+      - name: Write .env.test file
         env:
           DB_URL: ${{ secrets.DATABASE_URL }}
           BASE_URL: ${{ secrets.TEST_BASE_URL }}
@@ -120,20 +137,20 @@ jobs:
           TEST_LECTURER_PASSWORD=$LECTURER_PWD
           ENVEOF
 
-      # ── LANGKAH 9: Jalankan API Tests ─────────────────────────────────
-      - name: Run API Tests
+      # ── STEP 9: Run API tests ──────────────────────────────────────────
+      - name: Run API tests
         run: npm run test:api
         env:
           CI: true
 
-      # ── LANGKAH 10: Jalankan UI Tests ─────────────────────────────────
-      - name: Run UI Tests
+      # ── STEP 10: Run UI tests ──────────────────────────────────────────
+      - name: Run UI tests
         run: npm run test:ui:clean
         env:
           CI: true
 
-      # ── LANGKAH 11: Upload laporan sebagai artifact ───────────────────
-      - name: Upload test reports sebagai artifact
+      # ── STEP 11: Upload test reports as artifact ───────────────────────
+      - name: Upload test reports as artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -144,8 +161,8 @@ jobs:
             test-results/
           retention-days: 14
 
-      # ── LANGKAH 12: Deploy laporan ke GitHub Pages ────────────────────
-      - name: Deploy laporan ke GitHub Pages
+      # ── STEP 12: Deploy reports to GitHub Pages ────────────────────────
+      - name: Deploy reports to GitHub Pages
         if: github.ref == 'refs/heads/main'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -165,8 +182,8 @@ jobs:
             --dotfiles \
             --repo "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
 
-      # ── LANGKAH 13: Tutup SSH Tunnel (Pembersihan) ────────────────────
-      - name: Close SSH Tunnel
+      # ── STEP 13: Close SSH tunnel (cleanup) ───────────────────────────
+      - name: Close SSH tunnel
         if: always()
         run: |
           pkill -f "ssh -i ~/.ssh/id_rsa -L 5432:localhost:5432" || true
