@@ -4,15 +4,15 @@ import { getValidAcademicClassId } from './helpers/api-db';
 /**
  * API Test Suite: GET /api/grade
  *
- * Priority 3 — Endpoint khusus untuk export nilai satu kelas akademik.
- * Digunakan dalam alur penilaian: dosen download template → isi nilai → upload.
+ * Priority 3 — Dedicated endpoint for exporting grades of a single academic class.
+ * Used in the grading workflow: lecturer downloads template → fills in grades → uploads.
  *
- * Dua mode yang diuji secara terpisah:
- *   - Tanpa ?template  → export nilai aktual (ExportAssessmentGrade)
- *   - Dengan ?template → export template kosong  (ExportAssessmentTemplate)
+ * Two modes tested separately:
+ *   - Without ?template → export actual grades (ExportAssessmentGrade)
+ *   - With ?template=1  → export blank template (ExportAssessmentTemplate)
  *
- * Kedua mode menghasilkan file XLSX dari data kelas yang sama (academicClassId),
- * tetapi struktur isinya berbeda: template kosong vs kolom nilai terisi.
+ * Both modes produce an XLSX file from the same class data (academicClassId),
+ * but their content structure differs: blank template vs. filled grade columns.
  */
 
 const XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -25,11 +25,11 @@ function assertValidXlsx(body: Buffer, contentType: string, disposition: string)
   expect(body[1]).toBe(0x4B); // 'K'
 }
 
-// ── Validasi parameter (selalu jalan) ─────────────────────────────────────────
+// ── Parameter validation (always runs) ───────────────────────────────────────
 
-test.describe('GET /api/grade — validasi parameter', () => {
+test.describe('GET /api/grade — parameter validation', () => {
 
-  test('harus return 400 jika academicClassId tidak ada', async ({ request }) => {
+  test('should return 400 if academicClassId is missing', async ({ request }) => {
     const res = await request.get('/api/grade');
     expect(res.status()).toBe(400);
   });
@@ -37,9 +37,9 @@ test.describe('GET /api/grade — validasi parameter', () => {
 
 });
 
-// ── Happy path — butuh AcademicClass di DB ────────────────────────────────────
+// ── Happy path — requires an AcademicClass record in the DB ──────────────────
 
-test.describe('GET /api/grade — export nilai aktual dan template', () => {
+test.describe('GET /api/grade — actual grades and template export', () => {
 
   let classId: string | null;
 
@@ -47,8 +47,8 @@ test.describe('GET /api/grade — export nilai aktual dan template', () => {
     classId = getValidAcademicClassId();
   });
 
-  test('tanpa ?template harus return Excel nilai aktual', async ({ request }) => {
-    test.skip(!classId, 'Tidak ada AcademicClass di database');
+  test('without ?template should return Excel with actual grades', async ({ request }) => {
+    test.skip(!classId, 'No AcademicClass found in the database');
 
     const res = await request.get(`/api/grade?academicClassId=${classId}`);
     const body = await res.body();
@@ -57,24 +57,24 @@ test.describe('GET /api/grade — export nilai aktual dan template', () => {
     expect(res.headers()['content-disposition']).toMatch(/Kelas .+ - \(.+\) .+\.xlsx/);
   });
 
-  test('dengan ?template harus return Excel template kosong', async ({ request }) => {
-    test.skip(!classId, 'Tidak ada AcademicClass di database');
+  test('with ?template=1 should return an empty Excel template', async ({ request }) => {
+    test.skip(!classId, 'No AcademicClass found in the database');
 
     const res = await request.get(`/api/grade?academicClassId=${classId}&template=1`);
     const body = await res.body();
     assertValidXlsx(body, res.headers()['content-type'], res.headers()['content-disposition']);
-    // Filename sama, tetapi isi file berbeda (kolom nilai kosong)
+    // Same filename, but different file content (grade columns are empty)
     expect(res.headers()['content-disposition']).toMatch(/Kelas .+ - \(.+\) .+\.xlsx/);
   });
 
-  test('kedua mode menghasilkan file dengan nama yang sama', async ({ request }) => {
-    test.skip(!classId, 'Tidak ada AcademicClass di database');
+  test('both modes should produce a file with the same name', async ({ request }) => {
+    test.skip(!classId, 'No AcademicClass found in the database');
 
     const [resActual, resTemplate] = await Promise.all([
       request.get(`/api/grade?academicClassId=${classId}`),
       request.get(`/api/grade?academicClassId=${classId}&template=1`),
     ]);
-    // Nama file harus identik (hanya isi Excel yang berbeda)
+    // Filenames must be identical — only the Excel content differs
     expect(resActual.headers()['content-disposition'])
       .toBe(resTemplate.headers()['content-disposition']);
   });

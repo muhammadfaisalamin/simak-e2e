@@ -4,20 +4,20 @@ import { getValidPaymentFilename } from './helpers/api-db';
 /**
  * API Test Suite: GET /api/payment
  *
- * Priority 5 — File serving untuk bukti pembayaran herregistrasi.
- * Identik dengan /api/avatar, ditambah satu fitur: parameter ?download=true
- * mengubah Content-Disposition dari inline ke attachment.
+ * Priority 5 — File serving for reregistration payment receipts.
+ * Identical to /api/avatar, with one additional feature: the ?download=true parameter
+ * changes Content-Disposition from inline to attachment.
  *
- * Cakupan:
+ * Coverage:
  *   - Missing param → 400
- *   - File tidak ditemukan → 404
- *   - File valid + download=false (default) → inline
- *   - File valid + download=true            → attachment dengan filename
+ *   - File not found → 404
+ *   - Valid file + download=false (default) → inline
+ *   - Valid file + download=true            → attachment with filename
  */
 
-test.describe('GET /api/payment — validasi parameter', () => {
+test.describe('GET /api/payment — parameter validation', () => {
 
-  test('harus return 400 jika parameter file tidak ada', async ({ request }) => {
+  test('should return 400 if file parameter is missing', async ({ request }) => {
     const res = await request.get('/api/payment');
     expect(res.status()).toBe(400);
     const text = await res.text();
@@ -26,9 +26,9 @@ test.describe('GET /api/payment — validasi parameter', () => {
 
 });
 
-test.describe('GET /api/payment — file tidak ditemukan', () => {
+test.describe('GET /api/payment — file not found', () => {
 
-  test('harus return 404 untuk nama file yang tidak ada di disk', async ({ request }) => {
+  test('should return 404 for a filename that does not exist on disk', async ({ request }) => {
     const res = await request.get('/api/payment?file=nonexistent_receipt_xyz.pdf');
     expect(res.status()).toBe(404);
     const text = await res.text();
@@ -45,8 +45,8 @@ test.describe('GET /api/payment — happy path', () => {
     filename = await getValidPaymentFilename();
   });
 
-  test('tanpa ?download harus return file dengan Content-Disposition inline', async ({ request }) => {
-    test.skip(!filename, 'Tidak ada paymentReceiptFile di database');
+  test('without ?download should return file with Content-Disposition: inline', async ({ request }) => {
+    test.skip(!filename, 'No paymentReceiptFile found in the database');
 
     const res = await request.get(`/api/payment?file=${encodeURIComponent(filename)}`);
     expect(res.status()).toBe(200);
@@ -57,16 +57,16 @@ test.describe('GET /api/payment — happy path', () => {
     expect(body.length).toBeGreaterThan(0);
   });
 
-  test('dengan ?download=false harus return Content-Disposition inline', async ({ request }) => {
-    test.skip(!filename, 'Tidak ada paymentReceiptFile di database');
+  test('with ?download=false should return Content-Disposition: inline', async ({ request }) => {
+    test.skip(!filename, 'No paymentReceiptFile found in the database');
 
     const res = await request.get(`/api/payment?file=${encodeURIComponent(filename)}&download=false`);
     expect(res.status()).toBe(200);
     expect(res.headers()['content-disposition']).toBe('inline');
   });
 
-  test('dengan ?download=true harus return Content-Disposition attachment dengan nama file', async ({ request }) => {
-    test.skip(!filename, 'Tidak ada paymentReceiptFile di database');
+  test('with ?download=true should return Content-Disposition: attachment with filename', async ({ request }) => {
+    test.skip(!filename, 'No paymentReceiptFile found in the database');
 
     const res = await request.get(`/api/payment?file=${encodeURIComponent(filename)}&download=true`);
     expect(res.status()).toBe(200);
@@ -75,8 +75,8 @@ test.describe('GET /api/payment — happy path', () => {
     expect(disposition).toContain(filename);
   });
 
-  test('mode inline dan download menghasilkan body yang identik', async ({ request }) => {
-    test.skip(!filename, 'Tidak ada paymentReceiptFile di database');
+  test('inline and download modes should produce identical response bodies', async ({ request }) => {
+    test.skip(!filename, 'No paymentReceiptFile found in the database');
 
     const [resInline, resDownload] = await Promise.all([
       request.get(`/api/payment?file=${encodeURIComponent(filename)}`),
@@ -86,7 +86,7 @@ test.describe('GET /api/payment — happy path', () => {
     const bodyDownload = await resDownload.body();
 
     expect(bodyInline.length).toBe(bodyDownload.length);
-    // Isi file harus sama persis — hanya header yang berbeda
+    // File content must be identical — only the header differs
     expect(bodyInline.equals(bodyDownload)).toBe(true);
   });
 

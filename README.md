@@ -212,7 +212,7 @@ GitHub Actions Runner (ubuntu-latest)
 ### Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/simak-e2e.git
+git clone https://github.com/muhammadfaisalamin/simak-e2e.git
 cd simak-e2e
 npm install
 npx playwright install chromium
@@ -319,7 +319,7 @@ simak-e2e/
 
 Live HTML reports are published to GitHub Pages after every successful push to `main`:
 
-- **API Report**: `https://USERNAME.github.io/simak-e2e/api/`
-- **UI Report**: `https://USERNAME.github.io/simak-e2e/ui/`
+- **API Report**: `https://muhammadfaisalamin.github.io/simak-e2e/api/`
+- **UI Report**: `https://muhammadfaisalamin.github.io/simak-e2e/ui/`
 
 Reports include test timeline, failure screenshots, and video recordings for failed tests.

@@ -4,21 +4,21 @@ import { getValidAvatarFilename } from './helpers/api-db';
 /**
  * API Test Suite: GET /api/avatar
  *
- * Priority 4 — File serving sederhana untuk foto mahasiswa.
- * Tidak ada DB query, tidak ada business logic; risiko regresi paling rendah.
+ * Priority 4 — Simple file serving for student photos.
+ * No DB queries, no business logic; lowest regression risk.
  *
- * File disimpan di folder yang dikonfigurasi via env AVATAR_FOLDER.
- * Response selalu inline (bukan attachment), sehingga gambar tampil di browser.
+ * Files are stored in the folder configured via the AVATAR_FOLDER env variable.
+ * Response is always inline (not attachment), so the image renders directly in the browser.
  *
- * Cakupan:
+ * Coverage:
  *   - Missing param → 400
- *   - File tidak ditemukan di disk → 404
- *   - File valid → 200 + image/* Content-Type + Content-Disposition: inline
+ *   - File not found on disk → 404
+ *   - Valid file → 200 + image/* Content-Type + Content-Disposition: inline
  */
 
-test.describe('GET /api/avatar — validasi parameter', () => {
+test.describe('GET /api/avatar — parameter validation', () => {
 
-  test('harus return 400 jika parameter file tidak ada', async ({ request }) => {
+  test('should return 400 if file parameter is missing', async ({ request }) => {
     const res = await request.get('/api/avatar');
     expect(res.status()).toBe(400);
     const text = await res.text();
@@ -27,9 +27,9 @@ test.describe('GET /api/avatar — validasi parameter', () => {
 
 });
 
-test.describe('GET /api/avatar — file tidak ditemukan', () => {
+test.describe('GET /api/avatar — file not found', () => {
 
-  test('harus return 404 untuk nama file yang tidak ada di disk', async ({ request }) => {
+  test('should return 404 for a filename that does not exist on disk', async ({ request }) => {
     const res = await request.get('/api/avatar?file=nonexistent_file_xyz.jpg');
     expect(res.status()).toBe(404);
     const text = await res.text();
@@ -40,15 +40,15 @@ test.describe('GET /api/avatar — file tidak ditemukan', () => {
 
 test.describe('GET /api/avatar — happy path', () => {
 
-  test('harus return gambar dengan MIME type yang tepat dan Content-Disposition inline', async ({ request }) => {
+  test('should return an image with the correct MIME type and Content-Disposition: inline', async ({ request }) => {
     const filename = await getValidAvatarFilename();
-    test.skip(!filename, 'Tidak ada foto mahasiswa (Student.photo) di database');
+    test.skip(!filename, 'No student photo (Student.photo) found in the database');
 
     const res = await request.get(`/api/avatar?file=${encodeURIComponent(filename)}`);
     expect(res.status()).toBe(200);
 
     const contentType = res.headers()['content-type'];
-    expect(contentType).toMatch(/^image\//); // image/jpeg, image/png, dll
+    expect(contentType).toMatch(/^image\//); // image/jpeg, image/png, etc.
 
     const disposition = res.headers()['content-disposition'];
     expect(disposition).toBe('inline');
